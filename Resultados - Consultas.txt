@@ -1,0 +1,38 @@
+Medindo tempos de consultas - Sem Index:
+Idade entre 30 e 50
+Tempo de resposta: 0.077558 +- 0.321644 segundos
+Salário acima de 50k
+Tempo de resposta: 0.017188 +- 0.071639 segundos
+Array de inteiros
+Tempo de resposta: 0.010748 +- 0.048069 segundos
+Array de float
+Tempo de resposta: 0.011451 +- 0.051209 segundos
+Array de string
+Tempo de resposta: 0.010900 +- 0.048277 segundos
+Tempo de resposta (Sem Index): 0.025569 +- 0.151401 segundos
+
+Medindo tempos de consultas - Index Simples:
+Nome exato
+Tempo de resposta: 0.000050 +- 0.000224 segundos
+Idade entre 30 e 50
+Tempo de resposta: 0.074000 +- 0.306033 segundos
+Salário acima de 50k
+Tempo de resposta: 0.012719 +- 0.050892 segundos
+Geoespacial - próximos ao centro de SP
+Tempo de resposta: 0.006202 +- 0.026145 segundos
+Data de nascimento entre 1975 e 2005, salário acima de 50k
+Tempo de resposta: 0.000050 +- 0.000222 segundos
+Tempo de resposta (Index Simples): 0.018604 +- 0.139283 segundos
+
+Medindo tempos de consultas - Index Composto:
+Idade entre 30 e 50, data de nascimento entre 1975 e 2005
+Tempo de resposta: 0.000050 +- 0.000224 segundos
+Idade entre 30 e 50, salário acima de 50k
+Tempo de resposta: 0.004500 +- 0.018328 segundos
+
+Medindo tempos de consultas - Regex:
+Descrição
+Tempo de resposta: 0.020034 +- 0.089593 segundos
+Descrição e salário
+Tempo de resposta: 0.007088 +- 0.031696 segundos
+Tempo de resposta (Regex): 0.013561 +- 0.066655 segundos
