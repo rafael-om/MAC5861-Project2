@@ -17,159 +17,204 @@ import os
 import json
 import time
 import statistics 
+import pprint
+import re
+import sys
 from pymongo import MongoClient, ASCENDING, DESCENDING, GEOSPHERE
 from datetime import datetime
-from pprint import pprint
 
-port = 27017
+PRINT = False
+PROJECTION = False
 
+def preprocess(lines):
+    new_lines = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        if "db.pessoas.find" in lines[i]:
+            line = lines[i]
+            while ");" not in line:
+                i += 1
+                line += lines[i].strip()
+        new_lines.append(line)
+        if PRINT: print(line)
+        i += 1
+    return new_lines
 
-# 🔗 Conexão com o MongoDB (ajuste a URI conforme sua configuração)
-client = MongoClient("mongodb://localhost:" + str(port) + "/")
+def converter_json(text):
+    if text:
+        # Adiciona "" às chaves
+        text = re.sub(r'([\w$]+): ', r'"\1": ', text)
 
-# 🗄️ Criação do banco de dados e coleção
-db = client["bd_mac5861"]
-collection = db["collection"]
+        # Adiciona "" aos regex
+        text = re.sub(r'(/[^/]+/i)', r'"\1"', text)
 
+        # Calcula as divisões
+        def eval_div(match):
+            num1 = float(match.group(1))
+            num2 = float(match.group(2))
+            return str(num1 / num2)
+        pattern = r'(\d+(?:\.\d+)?)\s*/\s*(\d+(?:\.\d+)?)'
+        text = re.sub(pattern, eval_div, text)
 
-# ⏱️ Medição do tempo de resposta das consultas
-def medir_tempo_consulta(consulta):
+        # Calcula as datas
+        text = re.sub(r'ISODate\("([^"]+)"\)', r'{"$date":"\1"}', text)
+
+        if PRINT: print(text)
+        return json.loads(text)
+    else:
+        return None
+
+def parse(lines, colecao, numero_exec):
+    numero_consultas = 0 
+    for line in lines:
+        if "db.pessoas.find" in line:
+            numero_consultas += 1
+    inicio = datetime.now()
+    indexes = dict()
+    regions = dict()
+    numero_consulta = 0
+    region = None
+    consultas = None
+    for line in lines:
+        line = line.rstrip()
+        if "//" in line:
+            if "#region" in line:
+                # Nova categoria de consultas
+                region = dict()
+                title = line.replace("//#region", "").rstrip()
+                regions[title] = region
+                consultas = None
+            elif not "#endregion" in line:
+                # Sub cagetoria
+                consultas = []
+                title = line.replace("//", "").rstrip()
+                region[title] = consultas
+        elif "db.pessoas.find" in line:
+            if numero_exec == 0:
+                continue
+            numero_consulta += 1
+            fim = datetime.now()
+            decorrido = str(fim - inicio).split('.')[0]
+            print(f'\rRodando consultas ({numero_consulta}/{numero_consultas}) [{decorrido}]', end='', flush=True)
+
+            line = line.replace("db.pessoas.find(", "").replace(");", "")
+            if "hint(" in line:
+                consulta = line.split(").hint(")
+            else:
+                consulta = [line, None]
+            t, n = medir_tempo_consulta(colecao, consulta, numero_exec)
+            if consultas is None:
+                consultas = []
+                region[""] = consultas
+            consultas.append((consulta,t,n))
+        elif "db.pessoas.createIndex" in line:
+            line = line.replace("db.pessoas.createIndex(", "").replace(");", "")
+            i, t, s = medir_criacao_index(colecao, line)
+            if PRINT: print("Index criado: " + line)
+            indexes[i] = (t, s)
+        elif "db.pessoas.dropIndex" in line:
+            line = line.replace("db.pessoas.dropIndex(", "").replace(");", "")
+            colecao.drop_index(converter_json(line))
+            if PRINT: print("Index excluído: " + line)
+    if numero_exec > 0:
+        print()
+    return regions, indexes
+
+# Medição de tamanho e tempo de criação dos índices
+def medir_criacao_index(colecao, index):
+    index = converter_json(index)
+    name = "_".join(["%s_%s" % i for i in index.items()])
+    t = time.time()
+    colecao.create_index(index)
+    t = time.time() - t
+    stats = db.command("collStats", colecao.name)['indexSizes']
+    return name, t, stats[name]
+
+def criar_projecao(consulta):
+    p = {"_id": 0}
+    items = list(consulta.items())
+    while items:
+        (k, v) = items.pop()
+        #if k[0] != '$' and k != "type" and k != "coordinates":
+        #    p[k] = 1
+        if isinstance(v, dict):
+            items += list(v.items())
+    return p
+
+# Medição do tempo de resposta das consultas
+def medir_tempo_consulta(colecao, args, numero_exec):
+    # print('Número de execuções', numero_exec)
+    f = converter_json(args[0])
+    hint = converter_json(args[1])
+    p = criar_projecao(f) if PROJECTION else None
     tempos = []
-    for i in range(0, 20):
-        inicio = time.time()
-        resultado = list(consulta)
-        fim = time.time()
-        tempo = fim - inicio
-        tempos.append(tempo)
+    n_resultados = []
+    if PRINT: print(f)
+    for _ in range(0, numero_exec):
+        explicacao = colecao.find(f, p, hint=hint).explain()
+        tempos.append(explicacao["executionStats"]["executionTimeMillis"]/1000)
+        n_resultados.append(explicacao['executionStats']['nReturned'])
     avg = statistics.mean(tempos)
     std = statistics.stdev(tempos)
-    print(f"Tempo de resposta: {avg:.6f} +- {std:.6f} segundos")
-    return tempos
+    if PRINT: print(f"Tempo de resposta: {avg:.6f} segundos com desvio padrão {std:.6f} ")
+    return tempos, n_resultados
 
+if __name__ == '__main__':
+    db_name='bd_mac5861'
+    colecao_name='pessoas'
+    mongo_uri='mongodb://localhost:27017'
 
-def print_stats():
-    stats = db.command("collStats", "collection")
+    client = MongoClient(mongo_uri)
+    db = client[db_name]
+    colecao = db[colecao_name]
+    colecao.drop_indexes()
 
-    print(stats)
+    nome_documento = f"{datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}"
+    numero_exec = 2
 
-    print("\n📊 Tamanho de cada índice:")
-    for indice, tamanho in stats['indexSizes'].items():
-        print(f" - {indice}: {tamanho / 1024:.2f} KB")
-    print(f"Index Size: {stats['totalIndexSize']/1024/1024:.2f} MB")
-    print(f"Storage Size: {stats['storageSize']/1024/1024:.2f} MB")
+    if len(sys.argv) > 2:
+        nome_documento = sys.argv[1]
+        numero_exec = int(sys.argv[2])
 
+    with open("consultas.js", "r") as f:
+        lines = preprocess(f.read().splitlines())
+        r, index = parse(lines, colecao, numero_exec)
 
-def consultas_sem_index():
-    print("\nMedindo tempos de consultas - Sem Index:")
-    tempos = []
+    # Abre o arquivo para escrita antes do loop principal
+    if numero_exec > 0:
+        with open(f"avg-std-{nome_documento}.txt", "w") as f_out:
+            for key, value in r.items():
+                if PRINT: print(key)
+                f_out.write(key + "\n")
+                for key2, consultas in value.items():
+                    if len(key2) > 0:
+                        if PRINT: print(key2)
+                        f_out.write(key2 + "\n")
+                    tempos_total = []
+                    i = 1
+                    for consulta, tempos, result_sizes in consultas:
+                        if PRINT:
+                            print(consulta)
+                            print(tempos)
+                            print(result_sizes)
+                        avg = statistics.mean(tempos)
+                        std = statistics.stdev(tempos)
+                        avg_n = int(statistics.mean(result_sizes))
+                        f_out.write(f"{i:5d}: {avg:.6f} +- {std:.6f} -- {avg_n}\n")
+                        tempos_total += tempos
+                        i += 1
+                    if tempos_total:
+                        avg = statistics.mean(tempos_total)
+                        std = statistics.stdev(tempos_total)
+                        f_out.write(f"Total: {avg:.6f} +- {std:.6f}\n")
+                if PRINT: print()
+                f_out.write("\n")
+        print(f"avg-std-{nome_documento}.txt criado")
 
-    print("Idade entre 30 e 50")
-    consulta = collection.find({"idade2": {"$gte": 30, "$lte": 50}})
-    tempos += medir_tempo_consulta(consulta)
-
-    print("Salário acima de 50k")
-    consulta = collection.find({"salario2": {"$gt": 50000}})
-    tempos += medir_tempo_consulta(consulta)
-
-    print("Array de inteiros")
-    consulta = collection.find({"array_int": 12522})
-    tempos += medir_tempo_consulta(consulta)
-
-    print("Array de float")
-    consulta = collection.find({"array_float": 5329.944047697353})
-    tempos += medir_tempo_consulta(consulta)
-
-    print("Array de string")
-    consulta = collection.find({"array_str": "environment"})
-    tempos += medir_tempo_consulta(consulta)
-
-    avg = statistics.mean(tempos)
-    std = statistics.stdev(tempos)
-    print(f"Tempo de resposta (Sem Index): {avg:.6f} +- {std:.6f} segundos")
-
-
-def consultas_simples(nome):
-    print("\nMedindo tempos de consultas - Index Simples:")
-    tempos = []
-
-    print("Nome exato")
-    consulta = collection.find({"nome": nome})
-    tempos += medir_tempo_consulta(consulta)
-
-    print("Idade entre 30 e 50")
-    consulta = collection.find({"idade": {"$gte": 30, "$lte": 50}})
-    tempos += medir_tempo_consulta(consulta)
-
-    print("Salário acima de 50k")
-    consulta = collection.find({"salario": {"$gt": 50000}})
-    tempos += medir_tempo_consulta(consulta)
-
-    print("Geoespacial - próximos ao centro de SP")
-    ponto = {"type": "Point", "coordinates": [-46.633309, -23.55052]}
-    consulta = collection.find({
-        "localizacao_casa": {
-            "$near": {
-                "$geometry": ponto,
-                "$maxDistance": 5000
-            }
-        }
-    })
-    tempos += medir_tempo_consulta(consulta)
-
-    print("Data de nascimento entre 1975 e 2005, salário acima de 50k")
-    consulta = collection.find({
-        "data_nascimento": {"$gte": "1975-01-01", "$lte": "2005-12-31"}, 
-        "salario": {"$gt": 50000}
-    })
-    tempos += medir_tempo_consulta(consulta)
-
-    avg = statistics.mean(tempos)
-    std = statistics.stdev(tempos)
-    print(f"Tempo de resposta (Index Simples): {avg:.6f} +- {std:.6f} segundos")
-
-
-def consultas_composto():
-    print("\nMedindo tempos de consultas - Index Composto:")
-
-    print("Idade entre 30 e 50, data de nascimento entre 1975 e 2005")
-    consulta = collection.find({
-        "idade": {"$gte": 30, "$lte": 50}, 
-        "data_nascimento": {"$gte": "1975-01-01", "$lte": "2005-12-31"}
-    })
-    medir_tempo_consulta(consulta)
-
-    print("Idade entre 30 e 50, salário acima de 50k")
-    consulta = collection.find({
-        "idade": {"$gte": 30, "$lte": 50}, 
-        "salario": {"$gt": 50000}
-    })
-    medir_tempo_consulta(consulta)
-
-
-def consultas_regex(desc):
-    print("\nMedindo tempos de consultas - Regex:")
-    tempos = []
-
-    print("Descrição")
-    consulta = collection.find({"descricao": {"$regex": desc}})
-    tempos += medir_tempo_consulta(consulta)
-
-    print("Descrição e salário")
-    consulta = collection.find({
-        "descricao": {"$regex": desc}, 
-        "salario": {"$gt": 50000}
-    })
-    tempos += medir_tempo_consulta(consulta)
-
-    avg = statistics.mean(tempos)
-    std = statistics.stdev(tempos)
-    print(f"Tempo de resposta (Regex): {avg:.6f} +- {std:.6f} segundos")
-
-
-path = os.path.join("data", "registro_100000.json")
-with open(path, 'r', encoding='utf-8') as f:
-    dado = json.load(f)
-    consultas_sem_index()
-    consultas_simples(dado["nome"])
-    consultas_composto()
-    consultas_regex(dado["descricao"][:30])
+    with open(f"index-{nome_documento}.txt", "w") as f_out:
+        f_out.write("Tempo de criação, tamanho:\n")
+        for key, value in index.items():
+            time, size = value
+            f_out.write(f"{key}:\n{time:.6f}s\t{size/1024}kb\n")
+        print(f"index-{nome_documento}.txt criado")

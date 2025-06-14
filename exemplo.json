@@ -1,0 +1,22 @@
+{
+  "name": "Lívia Pastor",
+  "age": 77,
+  "birth_date": { "$date": "1948-05-20T22:21:41Z" },
+  "wage": 5031.38,
+  "description": "Property generation new cover fast pass response. Wonder agree already above example. Fall grow tough push piece. Fact born occur can than. Society apply doctor work important something. From property state whole model so. Summer exactly make lawyer. Have give offer couple eight term style week.",
+  "house_location_sphere": {
+    "type": "Point",
+    "coordinates": [77.09572728641302, -71.73045548756832]
+  },
+  "house_location_plane": [77.09572728641302, -71.73045548756832],
+  "old_wage": 9882.19,
+  "cellphones": [
+    8001039839, 6178331743, 1130611536, 5501121350416, 2180291994,
+    5501169510297, 3101503860, 5502182967658, 8476687750, 555184351537,
+    5505125395213, 7194711522
+  ],
+  "products_prices": [
+    72458.7, 89907.88, 34602.4, 48567.22, 88141.82, 70095.66, 8386.5, 7985.99,
+    46755.67, 18876.1, 69323.6, 43707.96, 50872.55
+  ]
+}

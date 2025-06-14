@@ -1,0 +1,21 @@
+Tempo de criação, tamanho:
+name_text:
+0.393156s	2112.0kb
+age_1:
+0.086399s	460.0kb
+wage_1:
+0.093406s	1720.0kb
+house_location_sphere_2dsphere:
+0.197893s	1756.0kb
+house_location_plane_2d:
+0.084745s	1432.0kb
+birth_date_1:
+0.093915s	1760.0kb
+cellphones_1:
+0.598699s	8656.0kb
+products_prices_1:
+0.449498s	11576.0kb
+wage_1_old_wage_1:
+0.109886s	2692.0kb
+description_text:
+3.833581s	51456.0kb

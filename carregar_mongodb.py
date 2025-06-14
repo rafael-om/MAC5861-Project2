@@ -1,75 +1,46 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-import os
+from concurrent.futures import ProcessPoolExecutor
 import json
-import time
-from pymongo import MongoClient, ASCENDING, DESCENDING, GEOSPHERE
-from datetime import datetime
+from tqdm import tqdm
+import os
+from pymongo import MongoClient
+import sys
 
-port = 27017
+def conectar_db(mongo_uri, db_name, colecao_name):
+    client = MongoClient(mongo_uri)
+    db = client[db_name]
+    colecao = db[colecao_name]
+    return colecao
 
-
-# 🔗 Conexão com o MongoDB (ajuste a URI conforme sua configuração)
-client = MongoClient("mongodb://localhost:" + str(port) + "/")
-
-# 🗄️ Criação do banco de dados e coleção
-db = client["bd_mac5861"]
-collection = db["collection"]
-
-# 📥 Função para carregar arquivos JSON até um limite especificado
-def carregar_dados(pasta="dados"):
-    arquivos = sorted([
-        arq for arq in os.listdir(pasta) if arq.startswith("registro_") and arq.endswith(".json")
-    ])
-    arquivos = arquivos[:limite]
-
-    documentos = []
-    for arq in arquivos:
-        caminho = os.path.join(pasta, arq)
-        with open(caminho, 'r', encoding='utf-8') as f:
-            dado = json.load(f)
-
-            # Conversão do campo de data (MongoDB aceita datetime)
-            if "data_nascimento" in dado and "$date" in dado["data_nascimento"]:
-                dado["data_nascimento"] = datetime.fromisoformat(dado["data_nascimento"]["$date"])
-
-            documentos.append(dado)
-
+def inserir_arquivo_mongodb_paralelo(args):
+    caminho_arquivo, mongo_uri, db_name, colecao_name = args
+    colecao = conectar_db(mongo_uri, db_name, colecao_name)
+    
+    with open(caminho_arquivo, 'r', encoding='utf-8') as f:
+        documentos = [json.loads(linha) for linha in f]
     if documentos:
-        collection.insert_many(documentos)
-        print(f"Inseridos {len(documentos)} documentos.")
+        colecao.insert_many(documentos)
+    return caminho_arquivo
+
+def inserir_dados_da_pasta_mongodb_paralelo(pasta, mongo_uri, db_name, colecao_name, n_processos=4):
+    arquivos = sorted([f for f in os.listdir(pasta) if f.endswith('.json')])
+    caminhos = [(os.path.join(pasta, arquivo), mongo_uri, db_name, colecao_name) for arquivo in arquivos]
+
+    with ProcessPoolExecutor(max_workers=n_processos) as executor:
+        for _ in tqdm(executor.map(inserir_arquivo_mongodb_paralelo, caminhos), total=len(caminhos), desc='Inserindo arquivos'):
+            pass
+
+    print(f'Pasta "{pasta}" foi inserida na coleção "{colecao_name}" em "{db_name}".')
+
+if __name__ == '__main__':
+    db_name='bd_mac5861'
+    colecao_name='pessoas'
+    mongo_uri='mongodb://localhost:27017'
+    colecao = conectar_db(mongo_uri, db_name, colecao_name)
+    colecao.drop()
+    if len(sys.argv) > 1:
+        inserir_dados_da_pasta_mongodb_paralelo(sys.argv[1], mongo_uri, db_name, colecao_name, n_processos=8)
     else:
-        print("Nenhum documento foi carregado.")
-
-
-# In[10]:
-
-
-# 🔧 Criação dos índices
-def criar_indices():
-    # Índices simples
-    collection.create_index([("nome", ASCENDING)])
-    collection.create_index([("idade", ASCENDING)])
-    collection.create_index([("salario", ASCENDING)])
-    collection.create_index([("data_nascimento", ASCENDING)])
-    collection.create_index([("descricao", ASCENDING)])
-    collection.create_index([("localizacao_casa", GEOSPHERE)])  # Índice geoespacial esférico
-    collection.create_index([("localizacao_casa_plano.x", ASCENDING), ("localizacao_casa_plano.y", ASCENDING)])
-
-    # Índices compostos
-    collection.create_index([("idade", ASCENDING), ("salario", DESCENDING)])
-    collection.create_index([("idade", ASCENDING), ("data_nascimento", ASCENDING)])
-    collection.create_index([("salario", DESCENDING), ("descricao", ASCENDING)])
-
-    print("Índices criados.")
-
-
-collection.delete_many({})
-print("Coleção limpa.")
-
-# 2. Carregar dados
-carregar_dados(pasta="data", limite=200000)
-
-# 3. Criar índices
-criar_indices()
+        inserir_dados_da_pasta_mongodb_paralelo('./data/10**8/', mongo_uri, db_name, colecao_name, n_processos=8)
