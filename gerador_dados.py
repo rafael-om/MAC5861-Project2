@@ -144,7 +144,7 @@ def gerar_dados_em_blocos(qtd=10**7, tamanho_bloco=10**5, pasta='./data/', n_pro
 
 
 if __name__ == '__main__':
-    if len(sys.argv) > 1:
+    if len(sys.argv) > 2:
         gerar_dados_em_blocos(qtd=int(sys.argv[1]), tamanho_bloco=int(sys.argv[2]), pasta='./sintetico/')
     else:
         gerar_dados_em_blocos(qtd=10**8, tamanho_bloco=10**6, pasta='./sintetico/')
